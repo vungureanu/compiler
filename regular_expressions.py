@@ -54,7 +54,10 @@ class NFA:
 	def __init__(self, alphabet, start_state = None, char_type = None):
 		self.alphabet = alphabet
 		self.accepting_states = []
-		self.start_state = start_state
+		if start_state == None:
+			self.start_state = NFA_State()
+		else:
+			self.start_state = start_state
 		self.states = [start_state]
 		self.number_of_states = 1
 		if char_type != None:
@@ -81,7 +84,7 @@ class NFA:
 
 	def join_NFAs(nfa1, nfa2):
 		"""Returns an NFA which recognizes the language {a | nfa1 accepts a or nfa2 accepts a}"""
-		nfa_join = NFA(nfa1.alphabet + nfa2.alphabet, start_state = NFA_State())
+		nfa_join = NFA(nfa1.alphabet + nfa2.alphabet)
 		nfa_join.number_of_states = nfa1.number_of_states + nfa2.number_of_states + 1
 		nfa_join.states.extend(nfa1.states + nfa2.states)
 		nfa_join.accepting_states = nfa1.accepting_states + nfa2.accepting_states

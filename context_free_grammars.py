@@ -6,7 +6,7 @@ class CFG:
 		self.rules = set(rules)
 		start_variable = rules[0].get_lhs()
 		self.start_symbol = Symbol(name = "<start>", stype = "variable")
-		self.rules.add(Rule(self.start_symbol, [start_variable]))
+		self.rules.add( Rule(self.start_symbol, [start_variable], None) )
 		for rule in rules:
 			self.symbols.add(rule.get_lhs())
 			for symbol in rule.get_rhs():
@@ -23,8 +23,8 @@ class CFG:
 
 		for rule in self.rules:
 			for terminal in filter(lambda t : t not in convert, rule.terminals()):
-				t_var = Symbol( name = "_" + terminal.name, stype = "variable")
-				t_rule = Rule(t_var, [terminal])
+				t_var = Symbol(name = "_" + terminal.name, stype = "variable")
+				t_rule = Rule(t_var, [terminal], None)
 				new_rules.add(t_rule)
 				convert[terminal] = t_var
 
@@ -88,12 +88,7 @@ def remove_unit_rule(rules, removed_rules):
 	new_rules = set()
 	for rule in rules:
 		if rule.get_lhs() == unit_rule.get_rhs()[0]:
-			if rule.old_rule == None:
-				old_rule = None
-			else:
-				old_rule = rule.old_rule.copy()
-				old_rule.lhs = unit_rule.get_lhs()
-			new_rule = Rule(unit_rule.get_lhs(), rule.get_rhs(), old_rule = old_rule)
+			new_rule = Rule(unit_rule.get_lhs(), rule.get_rhs(), rule.evaluation, old_rule = rule.old_rule) #old_rule, not rule.old_rule?
 			if new_rule not in removed_rules:
 				new_rules.add(new_rule)
 	rules |= new_rules
@@ -102,12 +97,13 @@ def remove_unit_rule(rules, removed_rules):
 
 class Rule:
 	number = 0
-	def __init__(self, lhs, rhs, old_rule = None):
+	def __init__(self, lhs, rhs, evaluation, old_rule = None):
 		print("Adding rule:", lhs, "->", rhs)
 		self.lhs = lhs
 		self.rhs = rhs
-		self.number = Rule.number
+		self.evaluation = evaluation
 		self.old_rule = old_rule # the rule, if any, whose splitting up led to creation of present rule
+		self.number = Rule.number
 		Rule.number += 1
 
 	def __eq__(self, other):
@@ -145,7 +141,7 @@ class Rule:
 		return len(self.rhs) == 1 and self.rhs[0].stype == "variable"
 
 	def copy(self):
-		return Rule(self.lhs, list(self.rhs), old_rule = self.old_rule)
+		return Rule(self.lhs, list(self.rhs), self.evaluation, old_rule = self.old_rule)
 
 	def terminals(self):
 		"""Returns list of non-solitary terminals"""
@@ -169,13 +165,13 @@ class Rule:
 		for i in range(len(self.rhs)-2):
 			new_symbol = Symbol.exists(self.rhs[i+1:])
 			if new_symbol != None:
-				rules.add( Rule(current_symbol, [self.rhs[i], new_symbol], old_rule = self) )
+				rules.add( Rule(current_symbol, [self.rhs[i], new_symbol], self.evaluation, old_rule = self) )
 				return None
 			else:
 				new_symbol = Symbol(expansion = self.rhs[i+1:])
-				rules.add( Rule(current_symbol, [self.rhs[i], new_symbol], old_rule = self) )
+				rules.add( Rule(current_symbol, [self.rhs[i], new_symbol], self.evaluation, old_rule = self) )
 				current_symbol = new_symbol
-		rules.add( Rule(current_symbol, self.rhs[-2:], old_rule = self) )
+		rules.add( Rule(current_symbol, self.rhs[-2:], self.evaluation, old_rule = self) )
 		return None
 
 	def is_nullable(self):
@@ -241,20 +237,8 @@ class CFG_Parser:
 						for left_variable in left_variables:
 							for right_variable in right_variables:
 								full_s.add( Parse_Node(lhs, [left_variable, right_variable], rule) )
-		self.roots = [node for node in table[0][l-1] if node.lhs == self.cfg.start_symbol]
+		self.roots = [node for node in table[0][length-1] if node.lhs == self.cfg.start_symbol]
 		return self.roots
-
-class Evaluator:
-	def __init__(self, functions, terminal_values):
-		self.functions = functions
-		self.terminal_values = terminal_values
-
-	def get_value(node):
-		# Evaluates the tree whose root is "node"
-		if node.is_unitary():
-			return self.terminal_values(node.rhs[0])
-		args = [get_value(node) for node in self.rhs]
-		return functions[node.rule](args)
 
 class Parse_Node:
 	# Represents a derivation of the form A -> D_1D_2, where D_1 and D_2 are derivations,
@@ -265,7 +249,7 @@ class Parse_Node:
 		self.expansion = []
 		self.rule = rule
 
-	def is_unitary():
+	def is_unitary(self):
 		return len(self.rhs) == 1
 
 	def has_abbreviation(self):
@@ -283,22 +267,34 @@ class Parse_Node:
 		return self.lhs.get_expansion()
 
 	def unwind(self):
+		# Returns [D_1, ..., D_n] if derives derivation of the form D_1D_2, where D_i derives D_{i+1}D_{i+2}
+		# for i <= n-2, and D_i is of the form {...} for 2 <= i <= n-1.
 		if not self.rhs[1].is_abbreviation():
 			return self.rhs
 		else:
 			return [self.rhs[0]] + self.rhs[1].unwind()
 
-	def produce_original_tree(self):
+	def unwind_tree(self):
 		if len(self.rhs) == 1:
-			return self.rhs
+			return self
 		if self.rhs[1].is_abbreviation():
-			left_child = [self.rhs[0].produce_original_tree()]
-			right_child = [node.produce_original_tree() for node in self.rhs[1].unwind()]
+			left_child = [self.rhs[0].unwind_tree()]
+			right_child = [node.unwind_tree() for node in self.rhs[1].unwind()]
 			return Parse_Node(self.lhs, left_child + right_child, self.rule.old_rule)
 
 		else:
-			children = [node.produce_original_tree() for node in self.rhs]
+			children = [node.unwind_tree() for node in self.rhs]
 			return Parse_Node(self.lhs, children, self.rule)
+
+	def get_value(self):
+		if len(self.rhs) == 1:
+			print("Value:", self, self.rhs[0].value)
+			return self.rhs[0].value
+		args = [node.get_value() for node in self.rhs]
+		print("Rule:", self.rule)
+		print("Args:", args)
+		print("Result:", self.rule.evaluation(args))
+		return self.rule.evaluation(args)
 
 	def __repr__(self):
 		if len(self.rhs) > 1:
@@ -320,18 +316,19 @@ class Parse_Node:
 class Symbol:
 	number = 0
 	symbols = [] # contains all symbols without duplicates
-	def __init__(self, name = None, stype = None, expansion = None):
+	def __init__(self, name = None, stype = None, expansion = None, value = None):
 		# The expansion of a symbol {AB} is the list [A, B]
 		print("Creating symbol:", name, expansion)
-		self.number = Symbol.number
-		Symbol.number += 1
 		if name != None:
 			self.name = name
 		elif expansion != None:
 			self.name = "{" + "".join([s.name for s in expansion]) + "}"
 		self.stype = stype
 		self.nullable = False
+		self.value = value
 		self.expansion = expansion
+		self.number = Symbol.number
+		Symbol.number += 1
 		Symbol.symbols.append(self)
 
 	def exists(expansion):
