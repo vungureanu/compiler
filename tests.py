@@ -1,13 +1,24 @@
 from regular_expressions import *
 from context_free_grammars import *
+from untyped_lambda import *
 import unittest
+from functools import partial
 
 class NFA_Test(unittest.TestCase):
+	def test_join(self):
+		alphabet = {'a', 'b'}
+		a = NFA(alphabet, char_type = "a")
+		b = NFA(alphabet, char_type = "b")
+		a = NFA.close_NFA(a)
+		b = NFA.close_NFA(b)
+		c = NFA.join_NFAs(a, b)
+		self.assertTrue(c.is_valid("bbb"))
+		self.assertFalse(c.is_valid("ab"))
 	def test_NFA(self):
-		alphabet = ['a', 'b', 'c']
-		a = NFA(alphabet, NFA_State(), "a")
-		b = NFA(alphabet, NFA_State(), "b")
-		c = NFA(alphabet, NFA_State(), "c")
+		alphabet = {'a', 'b', 'c'}
+		a = NFA(alphabet, char_type = "a", token_type = "OK")
+		b = NFA(alphabet, char_type = "b", token_type = "OK")
+		c = NFA(alphabet, char_type = "c", token_type = "Cool")
 		self.assertTrue(a.is_valid("a"))
 		self.assertFalse(a.is_valid("b"))
 		self.assertFalse(a.is_valid("ab"))
@@ -27,8 +38,20 @@ class NFA_Test(unittest.TestCase):
 		self.assertTrue(s.is_valid("ababcab"))
 		self.assertFalse(s.is_valid("cccba"))
 		dfa = s.convert()
-		self.assertTrue(s.is_valid("ababcab"))
-		self.assertFalse(s.is_valid("ababccca"))
+		self.assertTrue(dfa.is_valid("ababcab"))
+		self.assertTrue(dfa.is_valid("ccababccabc"))
+		self.assertFalse(dfa.is_valid("ababccca"))
+		self.assertFalse(dfa.is_valid("ccca"))
+		x = dfa.scan("cccabaa")
+		def ttt(fa):
+			print(fa)
+			for s in fa.states:
+				if s.accepting:
+					print("Check:", s, s.token_type)
+		#print(s)
+		#for k in dfa.states:
+		#	print(k.number, k.accepting, k.token_type)
+		#print(dfa)
 
 	def best_calculator(self):
 		def r_add(args):
@@ -62,79 +85,36 @@ class NFA_Test(unittest.TestCase):
 		parser = CFG_Parser(cfg)
 		stm = [open_p, open_p, D, x, C, close_p, p, B, close_p, f]
 		r = parser.parse(stm)[0]
-		print("OK:", r)
 		s = r.unwind_tree()
-		print("OK:", s)
-		print(s.get_value())
 
-	def test_lambda(self):
-		# lambda_s = Symbol("L", "terminal")
-		# open_p = Symbol("(", "terminal")
-		# close_p = Symbol(")", "terminal")
-		# v1 = Symbol("u", "terminal")
-		# v2 = Symbol("v", "terminal")
-		# dot = Symbol(".", "terminal")
-		# var = Symbol("<var>", "variable")
-		# exp = Symbol("<exp>", "variable")
-		# start = Symbol("<start>", "start")
-		# start = Rule(start, [exp])
-		# fn_app = Rule(exp, [open_p, exp, exp, close_p])
-		# lambda_abstraction = Rule(exp, [open_p, lambda_s, var, dot, exp, close_p])
-		# var_red = Rule(exp, [var])
-		# var_sim1 = Rule(var, [v1])
-		# var_sim2 = Rule(var, [v2])
-		#rules = [fn_app, lambda_abstraction, var_red, var_sim1, var_sim2]
-		# A = Symbol("A", "variable")
-		# B = Symbol("B", "variable")
-		# C = Symbol("C", "variable")
-		# D = Symbol("D", "terminal")
-		# E = Symbol("E", "terminal")
-		# r1 = Rule(A, [B, C, D, E])
-		# r2 = Rule(B, [C, D, E])
-		# r4 = Rule(B, [B, C])
-		# r3 = Rule(C, [E])
-		# rules = [r1, r2, r3, r4]
-		# cfg = CFG(rules)
-		# cfg.convert_rules_to_CNF()
-		# for rule in cfg.rules: print(rule)
-		# self.assertTrue(cfg.is_normal())
-		# parser = CFG_Parser(cfg)
-		# stm = [E, D, E, E, D, E]
-		# r = parser.parse(stm)[0]
-		# print(r, isinstance(r, Parse_Node))
-		# #for s in Symbol.symbols:
-		# #	print(s, s.get_expansion())
-		# CFG_Parser.reduce_tree(r)
-		# print(r.expansion)
-		pass
-
-	def test_RE(self):
+	def best_RE(self):
 		letters = []
-		space = Symbol(" ", "terminal") # 32
+		#space = Symbol(" ", "terminal") # 32
 		open_p = Symbol("(", "terminal") # 40
 		close_p = Symbol(")", "terminal") # 41
 		star = Symbol("*", "terminal") # 42
 		or_s = Symbol("|", "terminal") #124
 		for i in range(97, 100):
 			letters.append(Symbol(chr(i), "terminal"))
-		alphabet = [space, open_p, close_p, star, or_s] + letters
-		for symbol in letters:
-			symbol.value = NFA(alphabet, char_type = symbol)
+		alphabet = [open_p, close_p, star, or_s] + letters
+		#def fn(i):
+		#	return NFA(alphabet, char_type = letters[i])
+		for letter in letters:
+			letter.value = partial(lambda l: NFA(alphabet, char_type = l), letter) # Apparently necessary given the way Python handles closures (?)
 		letter = Symbol("<letter>", "variable")
 		word = Symbol("<word>", "variable")
-		or_exp = Symbol("<or_exp>", "variable")
+		or_exp = Symbol("<or>", "variable")
 		gen_exp = Symbol("<gen_exp>", "variable")
-		no_or_exp = Symbol("<no_or_exp>", "variable")
+		no_or_exp = Symbol("<nor>", "variable")
 		exp = Symbol("<exp>", "variable")
 		rules = [
 			Rule(exp, [or_exp], None),
 			Rule( word, [letter, word], lambda args: NFA.concatenate_NFAs(args[0], args[1]) ),
 			Rule(word, [letter], None),
-			Rule(space, [space, space], None),
 			Rule(no_or_exp, [word], None),
 			Rule( no_or_exp, [open_p, no_or_exp, close_p, star], lambda args: NFA.close_NFA(args[1]) ),
 			Rule( no_or_exp, [open_p, no_or_exp, close_p, open_p, no_or_exp, close_p], lambda args: concatenate_NFAs(args[1], args[4])),
-			Rule(or_exp, [no_or_exp, space, or_s, space, or_exp], lambda args: NFA.join_NFAs(args[0], args[4])),
+			Rule(or_exp, [no_or_exp, or_s, or_exp], lambda args: NFA.join_NFAs(args[0], args[2])),
 			Rule(or_exp, [no_or_exp], None),
 			Rule(exp, [open_p, exp, close_p, star], lambda args: NFA.close_NFA(args[1]))
 		]
@@ -144,15 +124,67 @@ class NFA_Test(unittest.TestCase):
 		cfg.convert_rules_to_CNF()
 		self.assertTrue(cfg.is_normal())
 		parser = CFG_Parser(cfg)
-		w = [open_p, letters[0], space, or_s, space, letters[1], close_p, star]
+		w = [open_p, letters[0], letters[1], close_p, star, or_s, open_p, letters[1], close_p, star]
 		r = parser.parse(w)[0]
 		s = r.unwind_tree()
 		v = s.get_value()
+		print(s)
 		v = v.convert()
-		print(v)
-		print(v.is_valid([letters[0]]))
-		print(v.is_valid([letters[1]]))
-		print(v.is_valid([letters[2]]))
+		self.assertTrue(v.is_valid([letters[0], letters[1], letters[0], letters[1]]))
+		self.assertTrue(v.is_valid([letters[1], letters[1], letters[1]]))
+		self.assertFalse(v.is_valid([letters[0], letters[1], letters[1]]))
+
+	def test_lambda(self):
+		lda = Symbol("λ", "terminal")
+		var = Symbol("<var>", "variable")
+		open_p = Symbol("(", "terminal") # 40
+		close_p = Symbol(")", "terminal") # 41
+		dot = Symbol(".", "terminal")
+		space = Symbol("_", "terminal")
+		exp = Symbol("<exp>", "variable")
+		variables = [Symbol(chr(i), "terminal") for i in range(97, 100)]
+		alphabet = [lda, open_p, close_p, dot, space] + variables
+		a, b, c = variables[0], variables[1], variables[2]
+		av, bv, cv, = Variable(name = "a"), Variable(name = "b"), Variable(name = "c")
+		a.value = lambda: av
+		b.value = lambda: bv
+		c.value = lambda: cv
+		letters = {"a", "b", "c"}
+		special_symbols = {"λ", "(", ")", ".", " "}
+		alphabet = letters | special_symbols
+		letter_NFAs = [ NFA(alphabet, char_type = l, token_type = l) for l in letters]
+		nfa_l = NFA(alphabet, char_type = "λ", token_type = "λ")
+		nfa_o = NFA(alphabet, char_type = "(", token_type = "(")
+		nfa_c = NFA(alphabet, char_type = ")", token_type = ")")
+		nfa_d = NFA(alphabet, char_type = ".", token_type = ".")
+		nfa_s = NFA.close_NFA(NFA(alphabet, char_type = " ", token_type = " "))
+		jn = NFA.close_NFA(NFA.join_NFAs(letter_NFAs[0], letter_NFAs[1], letter_NFAs[2]))
+		def ttt(fa):
+			print(fa)
+			for s in fa.states:
+				if s.accepting:
+					print("Check:", s, s.token_type)
+		nj = NFA.join_NFAs(jn, nfa_l, nfa_o, nfa_c, nfa_d, nfa_s)
+		nj = nj.convert()
+		print(nj.scan("((λab.b)    (λabc.bb))"))
+		#ttt(nj)
+		rules = [
+			Rule(exp, [open_p, exp, space, exp, close_p], lambda args: args[1].evaluate(args[3])),
+			Rule(exp, [open_p, lda, var, dot, exp, close_p], lambda args: Abstraction(args[2], args[4])),
+			Rule(exp, [var], None),
+		]
+
+		rules.extend( [Rule(var, [v], None) for v in variables] )
+		cfg = CFG(rules)
+		cfg.convert_rules_to_CNF()
+		self.assertTrue(cfg.is_normal())
+		parser = CFG_Parser(cfg)
+		w = [open_p, open_p, lda, c, dot, open_p, lda, a, dot, c, close_p, close_p, space, a, close_p]
+		r = parser.parse(w)[0]
+		s = r.unwind_tree()
+		#print("Tree:", s)
+		v = s.get_value()
+		#print("Value:", v)
 
 if __name__ == "__main__":
 	unittest.main()

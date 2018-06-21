@@ -23,7 +23,7 @@ class CFG:
 
 		for rule in self.rules:
 			for terminal in filter(lambda t : t not in convert, rule.terminals()):
-				t_var = Symbol(name = "_" + terminal.name, stype = "variable")
+				t_var = Symbol(name = terminal.name + "v", stype = "variable")
 				t_rule = Rule(t_var, [terminal], None)
 				new_rules.add(t_rule)
 				convert[terminal] = t_var
@@ -98,7 +98,7 @@ def remove_unit_rule(rules, removed_rules):
 class Rule:
 	number = 0
 	def __init__(self, lhs, rhs, evaluation, old_rule = None):
-		print("Adding rule:", lhs, "->", rhs)
+		#print("Adding rule:", lhs, "->", rhs)
 		self.lhs = lhs
 		self.rhs = rhs
 		self.evaluation = evaluation
@@ -281,19 +281,16 @@ class Parse_Node:
 			left_child = [self.rhs[0].unwind_tree()]
 			right_child = [node.unwind_tree() for node in self.rhs[1].unwind()]
 			return Parse_Node(self.lhs, left_child + right_child, self.rule.old_rule)
-
 		else:
 			children = [node.unwind_tree() for node in self.rhs]
 			return Parse_Node(self.lhs, children, self.rule)
 
 	def get_value(self):
 		if len(self.rhs) == 1:
-			print("Value:", self, self.rhs[0].value)
-			return self.rhs[0].value
+			#print("Value of", self, "is", self.rhs[0].value())
+			return self.rhs[0].value()
 		args = [node.get_value() for node in self.rhs]
-		print("Rule:", self.rule)
-		print("Args:", args)
-		print("Result:", self.rule.evaluation(args))
+		#print("Value of", self, "is", self.rule.evaluation(args))
 		return self.rule.evaluation(args)
 
 	def __repr__(self):
@@ -318,14 +315,17 @@ class Symbol:
 	symbols = [] # contains all symbols without duplicates
 	def __init__(self, name = None, stype = None, expansion = None, value = None):
 		# The expansion of a symbol {AB} is the list [A, B]
-		print("Creating symbol:", name, expansion)
+		#print("Creating symbol:", name, expansion)
 		if name != None:
 			self.name = name
 		elif expansion != None:
 			self.name = "{" + "".join([s.name for s in expansion]) + "}"
 		self.stype = stype
 		self.nullable = False
-		self.value = value
+		if value == None:
+			self.value = lambda: None
+		else:
+			self.value = value
 		self.expansion = expansion
 		self.number = Symbol.number
 		Symbol.number += 1
