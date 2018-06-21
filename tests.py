@@ -1,6 +1,7 @@
-from regular_expressions import *
+from finite_automata import *
 from context_free_grammars import *
 from untyped_lambda import *
+from regular_expressions import *
 import unittest
 from functools import partial
 
@@ -42,16 +43,6 @@ class NFA_Test(unittest.TestCase):
 		self.assertTrue(dfa.is_valid("ccababccabc"))
 		self.assertFalse(dfa.is_valid("ababccca"))
 		self.assertFalse(dfa.is_valid("ccca"))
-		x = dfa.scan("cccabaa")
-		def ttt(fa):
-			print(fa)
-			for s in fa.states:
-				if s.accepting:
-					print("Check:", s, s.token_type)
-		#print(s)
-		#for k in dfa.states:
-		#	print(k.number, k.accepting, k.token_type)
-		#print(dfa)
 
 	def best_calculator(self):
 		def r_add(args):
@@ -134,7 +125,7 @@ class NFA_Test(unittest.TestCase):
 		self.assertTrue(v.is_valid([letters[1], letters[1], letters[1]]))
 		self.assertFalse(v.is_valid([letters[0], letters[1], letters[1]]))
 
-	def test_lambda(self):
+	def best_lambda(self):
 		lda = Symbol("λ", "terminal")
 		var = Symbol("<var>", "variable")
 		open_p = Symbol("(", "terminal") # 40
@@ -158,7 +149,7 @@ class NFA_Test(unittest.TestCase):
 		nfa_c = NFA(alphabet, char_type = ")", token_type = ")")
 		nfa_d = NFA(alphabet, char_type = ".", token_type = ".")
 		nfa_s = NFA.close_NFA(NFA(alphabet, char_type = " ", token_type = " "))
-		jn = NFA.close_NFA(NFA.join_NFAs(letter_NFAs[0], letter_NFAs[1], letter_NFAs[2]))
+		jn = NFA.close_NFA(NFA.join_NFAs(letter_NFAs[0], letter_NFAs[1], letter_NFAs[2]), "<var>")
 		def ttt(fa):
 			print(fa)
 			for s in fa.states:
@@ -166,25 +157,60 @@ class NFA_Test(unittest.TestCase):
 					print("Check:", s, s.token_type)
 		nj = NFA.join_NFAs(jn, nfa_l, nfa_o, nfa_c, nfa_d, nfa_s)
 		nj = nj.convert()
-		print(nj.scan("((λab.b)    (λabc.bb))"))
-		#ttt(nj)
+		njs = nj.scan("((λa.(a c)) b)")
+		print(njs)
 		rules = [
 			Rule(exp, [open_p, exp, space, exp, close_p], lambda args: args[1].evaluate(args[3])),
 			Rule(exp, [open_p, lda, var, dot, exp, close_p], lambda args: Abstraction(args[2], args[4])),
 			Rule(exp, [var], None),
 		]
-
+		def format_scan(matches):
+			tokens = []
+			for match in matches:
+				if len(match.token_type) == 0:
+					raise UnknownTypeError(match)
+				else:
+					token_type = match.token_type.pop()
+					if token_type == "<var>":
+						new_variable = Variable(name = match.string)
+						new_symbol = Symbol(name = match.string, stype = "terminal", value = partial(lambda v: v, new_variable))
+						rules.append( Rule(var, [new_symbol], None) )
+						tokens.append(new_symbol)
+					elif token_type == "λ":
+						tokens.append(lda)
+					elif token_type == ".":
+						tokens.append(dot)
+					elif token_type == " ":
+						tokens.append(space)
+					elif token_type == "(":
+						tokens.append(open_p)
+					elif token_type == ")":
+						tokens.append(close_p)
+			return tokens
+		fs = format_scan(njs)
+		for i in fs: print(i)
+		print(fs)
 		rules.extend( [Rule(var, [v], None) for v in variables] )
 		cfg = CFG(rules)
 		cfg.convert_rules_to_CNF()
 		self.assertTrue(cfg.is_normal())
 		parser = CFG_Parser(cfg)
-		w = [open_p, open_p, lda, c, dot, open_p, lda, a, dot, c, close_p, close_p, space, a, close_p]
-		r = parser.parse(w)[0]
+		r = parser.parse(fs)[0]
 		s = r.unwind_tree()
-		#print("Tree:", s)
+		print(s)
 		v = s.get_value()
-		#print("Value:", v)
+		print("Value:", v)
+
+	def test_re(self):
+		re = Regular_Expression("(ab)*c")
+		self.assertFalse(re.test("abab"))
+		self.assertTrue(re.test("ababc"))
+		self.assertFalse(re.test("ababcc"))
+		re = Regular_Expression("((a)*(b)*c)*")
+		self.assertTrue(re.test("aaabbbcaabbbbbc"))
+		self.assertFalse(re.test("abac"))
+		re = Regular_Expression("bab|abb")
+		self.assertFalse(re.test("bab"))
 
 if __name__ == "__main__":
 	unittest.main()
