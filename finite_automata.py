@@ -5,9 +5,10 @@ epsilon = None
 
 class State:
 	number = 0
-	def __init__(self, accepting = False, token_type = None, dead_end = False):
+	def __init__(self, accepting = False, starting = False, token_type = None, dead_end = False):
 		self.transition = {}
 		self.accepting = accepting
+		self.starting = starting
 		self.token_type = token_type
 		self.dead_end = dead_end
 		self.number = State.number
@@ -71,7 +72,7 @@ class NFA:
 		self.alphabet = alphabet
 		self.accepting_states = set()
 		if start_state == None:
-			self.start_state = NFA_State()
+			self.start_state = NFA_State(starting = True)
 		else:
 			self.start_state = start_state
 		self.states = [self.start_state]
@@ -94,20 +95,18 @@ class NFA:
 		for state in nfa1.accepting_states:
 			state.add_transition(epsilon, nfa2.start_state)
 		nfa1.do_not_accept()
+		nfa2.start_state.starting = False
 		return nfa_concat
 
-	def join_NFAs(nfa1, nfa2, *other_NFAs): #may modify arguments
+	def join_NFAs(nfa_list): #may modify arguments
 		"""Returns an NFA which recognizes the language {a | nfa1 accepts a or nfa2 accepts a}"""
-		nfa_join = NFA(nfa1.alphabet | nfa2.alphabet)
-		nfa_join.states.extend(nfa1.states + nfa2.states)
-		nfa_join.accepting_states = nfa1.accepting_states | nfa2.accepting_states
-		nfa_join.start_state.add_transition(epsilon, nfa1.start_state)
-		nfa_join.start_state.add_transition(epsilon, nfa2.start_state)
-		for nfa in other_NFAs:
+		nfa_join = NFA(set())
+		for nfa in nfa_list:
+			nfa_join.alphabet |= nfa.alphabet
 			nfa_join.states.extend(nfa.states)
 			nfa_join.accepting_states |= nfa.accepting_states
 			nfa_join.start_state.add_transition(epsilon, nfa.start_state)
-			nfa_join.alphabet |= nfa.alphabet
+			nfa.start_state.starting = False
 		return nfa_join
 
 	def close_NFA(nfa, new_token_type = None): #may modify arguments
@@ -127,6 +126,14 @@ class NFA:
 		nfa.accepting_states.add(nfa.start_state)
 		nfa.start_state.token_type = token_type
 		return nfa
+
+	def complement_NFA(nfa):
+		complementary_nfa = NFA(nfa.alphabet)
+		complementary_nfa.states = nfa.convert().complement_DFA().convert_states()
+		complementary_nfa.accepting_states = {s for s in complementary_nfa.states if s}
+		for state in [s for s in complementary_nfa.states if s.starting]:
+			complementary_nfa.start_state = state
+		return complementary_nfa
 
 	def e_closure(self, starting_states):
 		"""Returns all states which can be reached from some state in starting_states along epsilon-paths (i.e., without any input)."""
@@ -189,13 +196,13 @@ class DFA:
 	def __init__(self, alphabet, token_type = None):
 		self.states = []
 		self.alphabet = alphabet
-		self.transition = {}
 		self.accepting_states = set()
 		self.start_state = None
 		self.token_type = token_type
 
 	def set_start_state(self, state):
 		self.start_state = state
+		state.starting = True
 		
 	def add_state(self, accepting, token_type, dead_end = False):
 		new_state = DFA_State(accepting = accepting, token_type = token_type, dead_end = dead_end)
@@ -233,6 +240,18 @@ class DFA:
 			elif current_state.is_dead_end():
 				return best_match
 		return best_match
+
+	def convert_states(self):
+		translation = {state: NFA_State(accepting = state.accepting, starting = state.starting, token_type = state.token_type) for state in self.states}
+		for state in self.states:
+			for char in self.alphabet:
+				translation[state].add_transition( char, translation[state.transition[char]] )
+		return translation.values()
+
+	def complement_DFA(self):
+		for state in self.states:
+			state.accepting = not state.accepting
+		return self
 
 	def __repr__(self):
 		return "Start: " + str(self.start_state.number) + "\n" + "\n".join([str(s) for s in self.states])

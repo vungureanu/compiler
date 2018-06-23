@@ -1,18 +1,23 @@
 class CFG:
 	def __init__(self, rules):
 		if len(rules) == 0:
-			raise NoRulesError
+			raise NoStatic_RulesError
 		self.symbols = set()
 		self.rules = set(rules)
-		start_variable = rules[0].get_lhs()
-		self.start_symbol = Symbol(name = "<start>", stype = "variable")
-		self.rules.add( Rule(self.start_symbol, [start_variable], None) )
+		start_variable = rules[0].lhs
+		self.start_symbol = Token(name = "<start>", stype = "start")
+		self.rules.add( Static_Rule(self.start_symbol, [start_variable], None) )
 		for rule in rules:
-			self.symbols.add(rule.get_lhs())
-			for symbol in rule.get_rhs():
+			self.symbols.add(rule.lhs)
+			for symbol in rule.rhs:
 				self.symbols.add(symbol)
 		self.simple_rules = set()
 		self.complex_rules = set()
+
+	def add_simple_rule(self, variable, terminal, evaluation):
+		new_rule = Static_Rule(variable, [terminal], lambda x: evaluation)
+		self.rules.add(new_rule)
+		self.simple_rules.add(new_rule)
 
 	def convert_rules_to_CNF(self):
 		"""Converts own list of rules into Chomsky normal form."""
@@ -23,8 +28,8 @@ class CFG:
 
 		for rule in self.rules:
 			for terminal in filter(lambda t : t not in convert, rule.terminals()):
-				t_var = Symbol(name = terminal.name + "v", stype = "variable")
-				t_rule = Rule(t_var, [terminal], None)
+				t_var = Token(name = terminal + "v", stype = "variable")
+				t_rule = Static_Rule(t_var, [terminal], lambda a: None)
 				new_rules.add(t_rule)
 				convert[terminal] = t_var
 
@@ -49,30 +54,25 @@ class CFG:
 			old_len = len(nullables)
 			for rule in self.rules:
 				if rule.is_nullable():
-					nullables.add(rule.get_lhs())
-					rule.get_lhs().set_nullable()
+					nullables.add(rule.lhs)
+					rule.lhs.set_nullable()
 
 		new_rules = set()
 		for rule in self.rules:
 			rule.remove_nullables(new_rules)
-		self.rules = {rule for rule in new_rules if len(rule.get_rhs()) > 0}
+		self.rules = {rule for rule in new_rules if rule.is_not_empty()}
 
 		# Eliminate rules of the form A -> B, where B is a variable
 		removed_rules = set()
 		while remove_unit_rule(self.rules, removed_rules):
 			pass
 
-		for rule in self.rules:
-			if len(rule.get_rhs()) == 1:
-				self.simple_rules.add(rule)
-			else:
-				self.complex_rules.add(rule)
+		self.simple_rules = {rule for rule in self.rules if len(rule.rhs) < 2}
+		self.complex_rules = {rule for rule in self.rules if len(rule.rhs) >= 2}
 
 	def is_normal(self):
 		for rule in self.rules:
-			rhs = rule.get_rhs()
-			lhs = rule.get_lhs()
-			if len(rhs) > 2 or (len(rhs) == 1 and rhs[0].stype == "variable") or (len(rhs) == 0 and lhs.stype != "start"):
+			if len(rule.rhs) > 2 or (len(rule.rhs) == 1 and Token.get_type(rule.rhs[0]) == "variable") or (len(rule.rhs) == 0 and Token.get_type(rule.lhs) != "start"):
 				return False
 		return True
 
@@ -87,8 +87,8 @@ def remove_unit_rule(rules, removed_rules):
 		return False
 	new_rules = set()
 	for rule in rules:
-		if rule.get_lhs() == unit_rule.get_rhs()[0]:
-			new_rule = Rule(unit_rule.get_lhs(), rule.get_rhs(), rule.evaluation, old_rule = rule.old_rule) #old_rule, not rule.old_rule?
+		if rule.lhs == unit_rule.rhs[0]:
+			new_rule = rule.get_merger(unit_rule)
 			if new_rule not in removed_rules:
 				new_rules.add(new_rule)
 	rules |= new_rules
@@ -97,24 +97,24 @@ def remove_unit_rule(rules, removed_rules):
 
 class Rule:
 	number = 0
-	def __init__(self, lhs, rhs, evaluation, old_rule = None):
-		#print("Adding rule:", lhs, "->", rhs)
+	def __init__(self, lhs, rhs, evaluation, old_rule = None, match_function = None):
 		self.lhs = lhs
 		self.rhs = rhs
 		self.evaluation = evaluation
 		self.old_rule = old_rule # the rule, if any, whose splitting up led to creation of present rule
-		self.number = Rule.number
-		Rule.number += 1
+		self.number = Static_Rule.number
+		self.match_function = match_function
+		Static_Rule.number += 1
 
 	def __eq__(self, other):
-		if not isinstance(other, Rule):
+		if not isinstance(other, Static_Rule):
 			return False
 		return self.lhs == other.lhs and self.rhs == other.rhs
 
 	def __repr__(self):
 		string = self.lhs.name + " ->"
 		for symbol in self.rhs:
-			string += " " + symbol.name
+			string += " " + Token.get_name(symbol)
 		return string
 
 	def __hash__(self):
@@ -125,27 +125,23 @@ class Rule:
 			s += hash(symbol) * prime
 		return s
 
-	def get_lhs(self):
-		return self.lhs
-
-	def get_rhs(self):
-		return self.rhs
-
-	def set_lhs(lhs):
-		self.lhs = lhs
-
 	def is_too_large(self):
 		return len(self.rhs) > 2
 
-	def is_unit(self):
-		return len(self.rhs) == 1 and self.rhs[0].stype == "variable"
-
-	def copy(self):
-		return Rule(self.lhs, list(self.rhs), self.evaluation, old_rule = self.old_rule)
+	def make_node(self, prefix, suffix = None):
+		# If "suffix" is not None, then "prefix" and "suffix" are both "Parse_Node"s
+		if len(self.rhs) == 1:
+			if suffix != None:
+				return None
+			if self.rhs[0] != prefix:
+				return None
+			return Parse_Node(self.lhs, [prefix], self)
+		if suffix != None and self.rhs[0] == prefix.lhs and self.rhs[1] == suffix.lhs:
+			return Parse_Node(self.lhs, [prefix, suffix], self)
 
 	def terminals(self):
 		"""Returns list of non-solitary terminals"""
-		terminals = filter(lambda s: s.stype == "terminal", self.rhs)
+		terminals = filter(lambda s: Token.get_type(s) == "terminal", self.rhs)
 		if len(self.rhs) > 1:
 			return terminals
 		else:
@@ -163,30 +159,76 @@ class Rule:
 		names = [symbol.name for symbol in self.rhs]
 		current_symbol = self.lhs
 		for i in range(len(self.rhs)-2):
-			new_symbol = Symbol.exists(self.rhs[i+1:])
+			new_symbol = Token.exists(self.rhs[i+1:])
 			if new_symbol != None:
-				rules.add( Rule(current_symbol, [self.rhs[i], new_symbol], self.evaluation, old_rule = self) )
+				rules.add( Static_Rule(current_symbol, [self.rhs[i], new_symbol], self.evaluation, old_rule = self) )
 				return None
 			else:
-				new_symbol = Symbol(expansion = self.rhs[i+1:])
-				rules.add( Rule(current_symbol, [self.rhs[i], new_symbol], self.evaluation, old_rule = self) )
+				new_symbol = Token(expansion = self.rhs[i+1:])
+				rules.add( Static_Rule(current_symbol, [self.rhs[i], new_symbol], self.evaluation, old_rule = self) )
 				current_symbol = new_symbol
-		rules.add( Rule(current_symbol, self.rhs[-2:], self.evaluation, old_rule = self) )
+		rules.add( Static_Rule(current_symbol, self.rhs[-2:], self.evaluation, old_rule = self) )
 		return None
 
 	def is_nullable(self):
-		return all( map(lambda s: s.is_nullable(), self.rhs) )
+		return all( map(lambda s: Token.is_nullable(s), self.rhs) )
 
 	def remove_nullables(self, rules, index = 0):
 		for i in range(index, len(self.rhs)):
-			if self.rhs[i].is_nullable():
+			if Token.is_nullable(self.rhs[i]):
 				new_rule = self.copy()
 				new_rule.rhs.pop(i)
 				new_rule.remove_nullables(rules, index = i)
 		rules.add(self)
 
+class Static_Rule(Rule):
+	def __init__(self, lhs, rhs, evaluation = None, old_rule = None):
+		super().__init__(lhs, rhs, evaluation, old_rule = old_rule)
 
-class NoRulesError(Exception):
+	def is_unit(self):
+		return len(self.rhs) == 1 and Token.get_type(self.rhs[0]) == "variable"
+
+	def copy(self):
+		return Static_Rule(self.lhs, list(self.rhs), self.evaluation, old_rule = self.old_rule)
+
+	def is_not_empty(self):
+		return len(self.rhs) > 0
+
+	def get_merger(self, unit_rule):
+		"""Combine self (rule of form B -> C_1...C_n) with "unit_rule" of form A -> B to yield A -> C_1...C_n"""
+		return Static_Rule(unit_rule.lhs, self.rhs, self.evaluation, old_rule = self.old_rule)
+
+class Dynamic_Rule(Rule):
+	def __init__(self, lhs, evaluation, match_function):
+		super().__init__(lhs, [], evaluation)
+		self.match_function = match_function
+
+	def make_node(self, prefix, suffix = None):
+		rhs = self.match_function(prefix, suffix)
+		if rhs == None:
+			return None
+		else:
+			return Parse_Node(self.lhs, rhs, self)
+
+	def get_merger(self, unit_rule):
+		return Dynamic_Rule(unit_rule.lhs, self.evaluation, self.match_function)
+
+	def is_unit(self):
+		return False
+
+	def is_nullable(self):
+		return False
+
+	def is_not_empty(self):
+		return True
+
+	def __hash__(self):
+		return hash((self.lhs, self.evaluation, self.match_function))
+
+	def __repr__(self):
+		return str(self.lhs) + " -> ?"
+
+class NoStatic_RulesError(Exception):
 	def __init__(self):
 		print("Error: no rules have been specified.")
 
@@ -195,9 +237,14 @@ class EmptyError(Exception):
 		print("Error: attempting to parse empty string.")
 
 class CFG_Parser:
+	""" Converts sequence of tokens into tree of "Parse_Node"s."""
+
+	"""Given a sequence of "Token"s and/or strings, returns a list of all "Parse_Node"s which
+	represent that sequence.  A "Parse_Node" (A, t, A -> t) represents the token t.
+	If p = (A, ...) represents s_1...s_i and q = (B, ...) represents t_1...t_j, then
+	(C, [p, q], C -> AB) represents s_1...s_it_1...t_j."""
 	def __init__(self, cfg):
 		self.cfg = cfg
-		self.roots = [] # All possible ways of parsing statement
 
 	def parse(self, symbol_array):
 		# The input consists of symbols w_0w_1...w_(length-1), where w_i = symbol_array[i]
@@ -209,8 +256,9 @@ class CFG_Parser:
 		for i in range(length):
 			symbol = symbol_array[i]
 			for rule in self.cfg.simple_rules:
-				if rule.get_rhs() == [symbol]:
-					table[i][i].add( Parse_Node(rule.get_lhs(), [symbol], rule) )
+				parse_node = rule.make_node(symbol)
+				if parse_node != None:
+					table[i][i].add(parse_node)
 		# We will search for progressively longer derivations of the form A -> BC in the table.
 		# The derivations of the each of the three terms will span the following ranges:
 		# A: [i, i+l-1]
@@ -224,33 +272,27 @@ class CFG_Parser:
 					suffix = table[j][i+l-1]
 					full_s = table[i][i+l-1]
 					for rule in self.cfg.complex_rules:
-						lhs = rule.get_lhs()
-						rhs = rule.get_rhs()
 						left_variables = []
 						right_variables = []
-						for node in prefix:
-							if node.lhs == rhs[0]:
-								left_variables.append(node)
-						for node in suffix:
-							if node.lhs == rhs[1]:
-								right_variables.append(node)
-						for left_variable in left_variables:
-							for right_variable in right_variables:
-								full_s.add( Parse_Node(lhs, [left_variable, right_variable], rule) )
-		self.roots = [node for node in table[0][length-1] if node.lhs == self.cfg.start_symbol]
-		return self.roots
+						for left_node in prefix:
+							for right_node in suffix:
+								parse_node = rule.make_node(left_node, right_node)
+								if parse_node != None:
+									full_s.add( parse_node )
+		return [node for node in table[0][length-1] if node.lhs == self.cfg.start_symbol]
 
 class Parse_Node:
-	# Represents a derivation of the form A -> D_1D_2, where D_1 and D_2 are derivations,
-	# or A -> b, where b is a terminal symbol.
+	""" Represents a derivation yielded by a rule of the form A -> BC."""
+
+	"""Represents a derivation of the form A -> D_1D_2, where D_1 and D_2 are derivations,
+	or A -> b, where b is a terminal symbol.  In either case, "lhs" is the "Token" A.  In the
+	former case, D_1 and D_2 are "Parse_Node"s, and "rule" is the rule A -> L_1L_2, where L_i
+	is the left-hand side of D_i. in the latter case, b is a "Token" or a string, and "rule"
+	is the rule A -> b."""
 	def __init__(self, lhs, rhs, rule):
 		self.lhs = lhs
 		self.rhs = rhs
-		self.expansion = []
 		self.rule = rule
-
-	def is_unitary(self):
-		return len(self.rhs) == 1
 
 	def has_abbreviation(self):
 		# Returns whether represents derivation of the form A -> B{CD}
@@ -287,10 +329,8 @@ class Parse_Node:
 
 	def get_value(self):
 		if len(self.rhs) == 1:
-			#print("Value of", self, "is", self.rhs[0].value())
-			return self.rhs[0].value()
+			return self.rule.evaluation(self.rhs[0])
 		args = [node.get_value() for node in self.rhs]
-		#print("Value of", self, "is", self.rule.evaluation(args))
 		return self.rule.evaluation(args)
 
 	def __repr__(self):
@@ -310,29 +350,24 @@ class Parse_Node:
 		else:
 			return hash((self.lhs, self.rhs[0], self.rhs[1]))
 
-class Symbol:
+class Token:
 	number = 0
 	symbols = [] # contains all symbols without duplicates
-	def __init__(self, name = None, stype = None, expansion = None, value = None):
+	def __init__(self, name = None, stype = None, expansion = None):
 		# The expansion of a symbol {AB} is the list [A, B]
-		#print("Creating symbol:", name, expansion)
 		if name != None:
 			self.name = name
 		elif expansion != None:
 			self.name = "{" + "".join([s.name for s in expansion]) + "}"
 		self.stype = stype
 		self.nullable = False
-		if value == None:
-			self.value = lambda: None
-		else:
-			self.value = value
 		self.expansion = expansion
-		self.number = Symbol.number
-		Symbol.number += 1
-		Symbol.symbols.append(self)
+		self.number = Token.number
+		Token.number += 1
+		Token.symbols.append(self)
 
 	def exists(expansion):
-		for symbol in Symbol.symbols:
+		for symbol in Token.symbols:
 			if symbol.expansion == expansion:
 				return symbol
 		return None 
@@ -346,11 +381,23 @@ class Symbol:
 	def set_nullable(self):
 		self.nullable = True
 
-	def is_nullable(self):
-		return self.nullable
+	def is_nullable(token):
+		return isinstance(token, Token) and token.nullable
+
+	def get_type(token):
+		if not isinstance(token, Token):
+			return "terminal"
+		else:
+			return token.stype
+
+	def get_name(token):
+		if isinstance(token, Token):
+			return token.name
+		else:
+			return token
 
 	def __eq__(self, other):
-		if not isinstance(other, Symbol):
+		if not isinstance(other, Token):
 			return False
 		return self.number == other.number
 
@@ -359,3 +406,48 @@ class Symbol:
 
 	def __repr__(self):
 		return self.name
+
+class Rule_Conversion:
+	def __init__(self, rules, evaluations, additional_rules = None):
+		"""Converts rules given in string form to rules given in canonical form."""
+
+		"""A rule is a string of the form <x> -> w_1...w_n, where x is any alpha-numeric string, and each
+		w_i is either of the form y or <y>, where y is an alpha-numeric string.  "additional_rules" is a list
+		of rule in standard format."""
+		self.rules = []
+		self.translation = {}
+		for rule, evaluation in zip(rules, evaluations):
+			self.add_rule(rule, evaluation)
+		if additional_rules != None:
+			for rule in additional_rules:
+				self.rules.append(Static_Rule(self.translation[rule[0]], [rule[1]], rule[2]))
+
+	def get_converted_rules(self):
+		return self.rules
+
+	def get_translation(self):
+		return self.translation
+
+	def add_rule(self, rule, evaluation, match_function = None):
+		lhs_string, rhs_string = rule.split(" -> ")
+		if lhs_string not in self.translation:
+			self.translation[lhs_string] = Token(lhs_string, "variable")
+		rhs = []
+		current_string = ""
+		flag = False
+		for char in rhs_string:
+			if flag:
+				current_string += char
+				if char == ">":
+					if current_string not in self.translation:
+						self.translation[current_string] = Token(current_string, "variable")
+					rhs.append(self.translation[current_string])
+					current_string = ""
+					flag = False
+			else:
+				if char == "<":
+					current_string = "<"
+					flag = True
+				else:
+					rhs.append(char)
+		self.rules.append(Static_Rule(self.translation[lhs_string], rhs, evaluation))
