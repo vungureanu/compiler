@@ -61,13 +61,22 @@ class NFA_Test(unittest.TestCase):
 		self.assertFalse(re.test("aaa"))
 
 	def test_lda(self):
-		lr = Lambda_Rules()
+		lr = Lambda_Calculus()
 		#print(lr.parse("((λa.(a c)) abb)"))
 		succ = "(λa.λb.λc.(b ((a b) c)))"
 		one = "(λf.λx.(f x))"
 		x = lr.parse("((" + succ + " " + one + ") " + "d) e")
 		y = x.simplify().simplify()
 		print(y)
+		print(lr.parse("mul"))
+		x = lr.parse("(mul 0) 0")
+		print(x)
+		lr.define("1", "succ 0")
+		lr.define("2", "succ 1")
+		lr.parse("2")
+		print(lr.parse("(mul 2) 2"))
+		lr.define("plus", "λm.λn.((m succ) n)")
+		print(lr.parse("(((plus 1) 1) f) x"))
 
 if __name__ == "__main__":
 	unittest.main()

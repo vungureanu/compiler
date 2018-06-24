@@ -68,7 +68,7 @@ class DFA_State(State):
 class NFA:
 	""" Represents a non-deterministic finite automaton.  It is defined by its alphabet, transition function, and \
 	set of states, one of which is the starting state and some of which are accepting states."""
-	def __init__(self, alphabet, start_state = None, char_type = None, token_type = None):
+	def __init__(self, alphabet, start_state = None, char_type = "", token_type = None):
 		self.alphabet = alphabet
 		self.accepting_states = set()
 		if start_state == None:
@@ -76,11 +76,12 @@ class NFA:
 		else:
 			self.start_state = start_state
 		self.states = [self.start_state]
-		if char_type != None:
-			accepting_state = NFA_State(accepting = True, token_type = {token_type})
-			self.accepting_states = {accepting_state}
-			self.start_state.add_transition(char_type, accepting_state)
-			self.states.append(accepting_state)
+		for char in char_type:
+			self.states.append( NFA_State() )
+			self.states[-2].add_transition(char, self.states[-1])
+		self.states[-1].accepting = True
+		self.states[-1].token_type = {token_type}
+		self.accepting_states = {self.states[-1]}
 
 	def do_not_accept(self):
 		for state in self.accepting_states:
@@ -277,7 +278,3 @@ class Translation:
 			new_state = self.dfa.add_state(accepting = any(states), token_type = token_type)
 			self.nfa_to_dfa[states] = new_state
 			return Translation.Result(new_state, True)
-
-class UnknownTypeError(Exception):
-	def __init__(self, token):
-		print("The token", token.string, "has unknown type.")

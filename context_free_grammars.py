@@ -5,7 +5,7 @@ class CFG:
 		self.symbols = set()
 		self.rules = set(rules)
 		start_variable = rules[0].lhs
-		self.start_symbol = Token(name = "<start>", stype = "start")
+		self.start_symbol = Token(name = "<start>")
 		self.rules.add( Static_Rule(self.start_symbol, [start_variable], None) )
 		for rule in rules:
 			self.symbols.add(rule.lhs)
@@ -28,7 +28,7 @@ class CFG:
 
 		for rule in self.rules:
 			for terminal in filter(lambda t : t not in convert, rule.terminals()):
-				t_var = Token(name = terminal + "v", stype = "variable")
+				t_var = Token(name = terminal + "v")
 				t_rule = Static_Rule(t_var, [terminal], lambda a: None)
 				new_rules.add(t_rule)
 				convert[terminal] = t_var
@@ -72,7 +72,7 @@ class CFG:
 
 	def is_normal(self):
 		for rule in self.rules:
-			if len(rule.rhs) > 2 or (len(rule.rhs) == 1 and Token.get_type(rule.rhs[0]) == "variable") or (len(rule.rhs) == 0 and Token.get_type(rule.lhs) != "start"):
+			if len(rule.rhs) > 2 or (len(rule.rhs) == 1 and isinstance(rule.rhs[0], Token)) or (len(rule.rhs) == 0 and rule.lhs != start_symbol):
 				return False
 		return True
 
@@ -96,15 +96,21 @@ def remove_unit_rule(rules, removed_rules):
 	return True
 
 class Rule:
+	"""Represents a rule of the form A -> B_1...B_n, where each B_i is a variable or terminal symbol"""
+
 	number = 0
 	def __init__(self, lhs, rhs, evaluation, old_rule = None, match_function = None):
+		"""Represents the rule A -> B_1...B_n iff "lhs" is the "Token" representing A and "rhs" is
+		the list [C_1, ..., C_n], where C_i is either the "Token" or string representing B_i.
+		"evaluation" is a function which maps the values of B_1, ..., B_n to the value of A.
+		"""
 		self.lhs = lhs
 		self.rhs = rhs
 		self.evaluation = evaluation
 		self.old_rule = old_rule # the rule, if any, whose splitting up led to creation of present rule
 		self.number = Static_Rule.number
 		self.match_function = match_function
-		Static_Rule.number += 1
+		Rule.number += 1
 
 	def __eq__(self, other):
 		if not isinstance(other, Static_Rule):
@@ -141,7 +147,7 @@ class Rule:
 
 	def terminals(self):
 		"""Returns list of non-solitary terminals"""
-		terminals = filter(lambda s: Token.get_type(s) == "terminal", self.rhs)
+		terminals = filter(lambda s: isinstance(s, str), self.rhs)
 		if len(self.rhs) > 1:
 			return terminals
 		else:
@@ -156,18 +162,18 @@ class Rule:
 				self.rhs[i] = convert[symbol]
 
 	def split_up(self, rules):
-		names = [symbol.name for symbol in self.rhs]
-		current_symbol = self.lhs
+		names = [token.name for token in self.rhs]
+		current_variable = self.lhs
 		for i in range(len(self.rhs)-2):
-			new_symbol = Token.exists(self.rhs[i+1:])
-			if new_symbol != None:
-				rules.add( Static_Rule(current_symbol, [self.rhs[i], new_symbol], self.evaluation, old_rule = self) )
+			new_variable = Token.exists(self.rhs[i+1:])
+			if new_variable != None:
+				rules.add( Static_Rule(current_variable, [self.rhs[i], new_variable], self.evaluation, old_rule = self) )
 				return None
 			else:
-				new_symbol = Token(expansion = self.rhs[i+1:])
-				rules.add( Static_Rule(current_symbol, [self.rhs[i], new_symbol], self.evaluation, old_rule = self) )
-				current_symbol = new_symbol
-		rules.add( Static_Rule(current_symbol, self.rhs[-2:], self.evaluation, old_rule = self) )
+				new_variable = Token(expansion = self.rhs[i+1:])
+				rules.add( Static_Rule(current_variable, [self.rhs[i], new_variable], self.evaluation, old_rule = self) )
+				current_variable = new_variable
+		rules.add( Static_Rule(current_variable, self.rhs[-2:], self.evaluation, old_rule = self) )
 		return None
 
 	def is_nullable(self):
@@ -186,7 +192,7 @@ class Static_Rule(Rule):
 		super().__init__(lhs, rhs, evaluation, old_rule = old_rule)
 
 	def is_unit(self):
-		return len(self.rhs) == 1 and Token.get_type(self.rhs[0]) == "variable"
+		return len(self.rhs) == 1 and isinstance(self.rhs[0], Token)
 
 	def copy(self):
 		return Static_Rule(self.lhs, list(self.rhs), self.evaluation, old_rule = self.old_rule)
@@ -199,6 +205,11 @@ class Static_Rule(Rule):
 		return Static_Rule(unit_rule.lhs, self.rhs, self.evaluation, old_rule = self.old_rule)
 
 class Dynamic_Rule(Rule):
+	"""A rule whose right-hand side cannot be determined when program is started"""
+
+	"""Useful for allowing rules of the form A -> t_1...t_n, where each t_i is a terminal symbol.  These
+	may be provided by the user after program is started
+	"""
 	def __init__(self, lhs, evaluation, match_function):
 		super().__init__(lhs, [], evaluation)
 		self.match_function = match_function
@@ -247,7 +258,9 @@ class CFG_Parser:
 		self.cfg = cfg
 
 	def parse(self, symbol_array):
-		# The input consists of symbols w_0w_1...w_(length-1), where w_i = symbol_array[i]
+		"""Converts a list of symbols (tokens and/or strings) into a list of "Parse_Node"s,
+		each of which is the root of a derivation tree for that list of symbols."""
+
 		length = len(symbol_array)
 		if length == 0:
 			raise EmptyError
@@ -293,12 +306,6 @@ class Parse_Node:
 		self.lhs = lhs
 		self.rhs = rhs
 		self.rule = rule
-
-	def has_abbreviation(self):
-		# Returns whether represents derivation of the form A -> B{CD}
-		if len(self.rhs) < 2:
-			return False
-		return self.rhs[1].is_abbreviation()
 
 	def is_abbreviation(self):
 		# Returns whether derives variable of the form {A_1...A_n} 
@@ -351,15 +358,15 @@ class Parse_Node:
 			return hash((self.lhs, self.rhs[0], self.rhs[1]))
 
 class Token:
+	"""Represents a variable in the CFG's rule-set"""
 	number = 0
 	symbols = [] # contains all symbols without duplicates
-	def __init__(self, name = None, stype = None, expansion = None):
+	def __init__(self, name = None, expansion = None):
 		# The expansion of a symbol {AB} is the list [A, B]
 		if name != None:
 			self.name = name
 		elif expansion != None:
 			self.name = "{" + "".join([s.name for s in expansion]) + "}"
-		self.stype = stype
 		self.nullable = False
 		self.expansion = expansion
 		self.number = Token.number
@@ -383,12 +390,6 @@ class Token:
 
 	def is_nullable(token):
 		return isinstance(token, Token) and token.nullable
-
-	def get_type(token):
-		if not isinstance(token, Token):
-			return "terminal"
-		else:
-			return token.stype
 
 	def get_name(token):
 		if isinstance(token, Token):
@@ -431,7 +432,7 @@ class Rule_Conversion:
 	def add_rule(self, rule, evaluation, match_function = None):
 		lhs_string, rhs_string = rule.split(" -> ")
 		if lhs_string not in self.translation:
-			self.translation[lhs_string] = Token(lhs_string, "variable")
+			self.translation[lhs_string] = Token(lhs_string)
 		rhs = []
 		current_string = ""
 		flag = False
@@ -440,7 +441,7 @@ class Rule_Conversion:
 				current_string += char
 				if char == ">":
 					if current_string not in self.translation:
-						self.translation[current_string] = Token(current_string, "variable")
+						self.translation[current_string] = Token(current_string)
 					rhs.append(self.translation[current_string])
 					current_string = ""
 					flag = False

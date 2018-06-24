@@ -1,6 +1,7 @@
 from regular_expressions import *
 
-class Lambda_Rules:
+class Lambda_Calculus:
+
 	rules = [
 		"<exp> -> λ<var>.<exp>",
 		"<exp> -> <exp> <exp>",
@@ -14,41 +15,68 @@ class Lambda_Rules:
 		lambda args: None
 	]
 
+	# Define valid words of language
+
 	alphabet = {chr(i) for i in range(ord("a"), ord("z")+1)}
+	digits = {str(i) for i in range(10)}
 	special_symbols = {"λ", "(", ")", ".", " "}
 	letter_nfas = [NFA({char}, char_type = char) for char in alphabet]
 	variable_names = NFA.close_NFA(NFA.join_NFAs(letter_nfas), new_token_type = "variable")
-	special_nfas = [NFA({char}, char_type = char, token_type = char) for char in special_symbols]
-	scanner = NFA.join_NFAs(letter_nfas + special_nfas).convert()
+	special_nfas = [NFA({char}, char_type = char, token_type = "special symbol") for char in special_symbols]
+	digit_nfas = [NFA({digit}, char_type = digit) for digit in digits]
+	number_nfa = NFA.close_NFA(NFA.join_NFAs(digit_nfas), new_token_type = "number")
+	scanner = NFA.join_NFAs([variable_names] + special_nfas + digit_nfas).convert()
 
 	def __init__(self):
 		self.variables = {}
-		rc = Rule_Conversion(Lambda_Rules.rules, Lambda_Rules.evaluations)
+		self.keywords = {}
+		# "variable_match" must refer to a different function for each member of Lambda_Calculus
+		rc = Rule_Conversion(Lambda_Calculus.rules, Lambda_Calculus.evaluations)
 
 		def variable_match(prefix, suffix):
 			"""Returns the "Variable" named "prefix", if any such exists"""
 			if isinstance(prefix, Token) and prefix.name in self.variables:
-				return [self.variables[prefix.name]]
+				return [prefix.name]
 			return None
 
-		vc = Dynamic_Rule(rc.get_translation()["<var>"], lambda x: x, variable_match)
-		self.cfg = CFG(rc.get_converted_rules() + [vc])
+		def keyword_match(prefix, suffix):
+			if isinstance(prefix, Token) and prefix.name in self.keywords:
+				return [prefix.name]
+
+		variable_conversion = Dynamic_Rule(rc.get_translation()["<var>"], lambda v: self.variables[v], variable_match)
+		keyword_parsing = Dynamic_Rule(rc.get_translation()["<exp>"], lambda kw: self.keywords[kw], keyword_match)
+
+		self.cfg = CFG(rc.get_converted_rules() + [variable_conversion, keyword_parsing])
 		self.cfg.convert_rules_to_CNF()
 		self.parser = CFG_Parser(self.cfg)
+		self.keywords = {
+			"fix" : None,
+			"succ" : self.parse("(λn.λf.λx.(f ((n f) x)))"),
+			"mul" : self.parse("(λm.λn.λf.λx.((m f) ((n f) x)))"),
+			"0" : self.parse("λf.λx.x")
+		}
 
 	def parse(self, string):
 		tokens = []
-		for token in Lambda_Rules.scanner.scan(string):
-			if "variable" in token.token_type:
-				if token in self.variables:
-					tokens.append(self.variables[token])
+		for token in Lambda_Calculus.scanner.scan(string):
+			if token.string in self.keywords:
+				tokens.append(Token(name = token.string))
+			elif "variable" in token.token_type:
+				if token.string in self.variables:
+					tokens.append(Token(name = token.string))
 				else:
 					new_variable = Variable(name = token.string)
 					self.variables[token.string] = new_variable
-					tokens.append(Token(name = token.string, stype = "variable"))
+					tokens.append(Token(name = token.string))
 			else:
 				tokens.append(token.string)
-		return self.parser.parse(tokens)[0].unwind_tree().get_value()
+		interpretations = self.parser.parse(tokens)
+		if len(interpretations) == 0:
+			raise InvalidParseStringError(string)
+		return interpretations[0].unwind_tree().get_value()
+
+	def define(self, variable, string):
+		self.keywords[variable] = self.parse("(" + string + ")")
 		
 class Lambda_Expression:
 
@@ -121,10 +149,7 @@ class Application:
 		return isinstance(self.function, Abstraction)		
 
 	def simplify(self):
-		if isinstance(self.function, Abstraction):
-			return self.function.evaluate(self.argument)
-		else:
-			return Application(self.function.simplify(), self.argument.simplify())
+		return self.function.simplify().evaluate(self.argument.simplify())
 
 	def __repr__(self):
 		return "(" + str(self.function) + " " + str(self.argument) + ")"
@@ -152,10 +177,14 @@ class Abstraction(Lambda_Expression):
 			return self.body.replace_variable(replacer, replacee)
 
 	def evaluate(self, argument):
-		result = self.body.substitute(argument, self.variable)
-		while result.can_be_simplified():
-			result = result.simplify()
-		return result
+		return self.body.substitute(argument, self.variable).simplify()
+
+	def simplify(self):
+		return Abstraction(self.variable, self.body.simplify())
 
 	def __repr__(self):
 		return "(λ" + str(self.variable) + "." + str(self.body) + ")"
+
+class InvalidParseStringError(Exception):
+	def __init__(self, string):
+		print("The string", string, "cannot be parsed.")
