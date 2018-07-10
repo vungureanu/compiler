@@ -1,160 +1,187 @@
 from regular_expressions import *
+from sys import stdin, stdout
 
 class Lambda_Calculus:
 
 	rules = [
-		"<exp> -> λ<var>.<exp>",
-		"<exp> -> <exp> <right>",
-		"<right> -> λ<var>.<exp>",
-		"<right> -> (<exp>)",
-		"<exp> -> <right>",
-		"<right> -> <var>"
+		"<str> <exp>",
+		"<str> <def>",
+		"<exp> <var>",
+		"<exp> <app>",
+		"<exp> <lda>",
+		"<app> <cls>",
+		"<exp> ( <exp> )",
+		"<app> ( <exp> ) _ <lda>",
+		"<cls> ( <exp> ) _ <var>",
+		"<cls> ( <exp> ) _ ( <exp> )",
+		"<app> <cls> _ <lda>",
+		"<cls> <cls> _ <var>",
+		"<cls> <cls> _ ( <exp> )",
+		"<app> <var> _ <lda>",
+		"<cls> <var> _ <var>",
+		"<cls> <var> _ ( <exp> )",
+		"<lda> λ <var> . <exp>",
+		"<def> <var> _ := _ <exp>",
 	]
 	evaluations = [
-		lambda args: Abstraction(variable = args[1], body = args[3]),
-		lambda args: Application(args[0], args[2]),
-		lambda args: Abstraction(variable = args[1], body = args[3]),
-		lambda args: args[1],
 		lambda args: None,
-		lambda args: None
+		lambda args: None,
+		lambda args: None,
+		lambda args: None,
+		lambda args: None,
+		lambda args: None,
+		lambda args: args[1],
+		lambda args: Application(args[1], args[4]),
+		lambda args: Application(args[1], args[4]),
+		lambda args: Application(args[1], args[5]),
+		lambda args: Application(args[0], args[2]),
+		lambda args: Application(args[0], args[2]),
+		lambda args: Application(args[0], args[3]),
+		lambda args: Application(args[0], args[2]),
+		lambda args: Application(args[0], args[2]),
+		lambda args: Application(args[0], args[3]),
+		lambda args: Abstraction(variable = args[1], body = args[3]),
+		lambda args: Definition(variable = args[0], expression = args[4])
 	]
 
 	# Define valid words of language
 
 	alphabet = [chr(i) for i in range(ord("a"), ord("z")+1)]
 	digits = {str(i) for i in range(10)}
-	special_symbols = {"λ", "(", ")", ".", " "}
+	special_symbols = {"λ", "(", ")", ".", " ", ":="}
 	letter_nfas = [NFA({char}, char_type = char) for char in alphabet]
 	variable_names = NFA.close_NFA(NFA.join_NFAs(letter_nfas), new_token_type = "variable")
-	special_nfas = [NFA({char}, char_type = char, token_type = "special symbol") for char in special_symbols]
+	special_nfas = [NFA(set(char), char_type = char, token_type = "special symbol") for char in special_symbols]
 	digit_nfas = [NFA({digit}, char_type = digit) for digit in digits]
 	number_nfa = NFA.close_NFA(NFA.join_NFAs(digit_nfas), new_token_type = "number")
 	scanner = NFA.join_NFAs([variable_names] + special_nfas + digit_nfas).convert()
 
-	def __init__(self, recursion_limit = 300):
+	def __init__(self, recursion_limit = 1000):
 		self.recursion_limit = recursion_limit
-		self.variables = {}
+		self.variables = set()
 		self.keywords = {}
-		# "variable_match" must refer to a different function for each member of Lambda_Calculus
+
 		rc = Rule_Conversion(Lambda_Calculus.rules, Lambda_Calculus.evaluations)
 
-		def variable_match(prefix, suffix):
-			"""Returns the "Variable" named "prefix", if any such exists"""
-			if isinstance(prefix, Token) and prefix.name in self.variables:
-				return [prefix.name]
-			return None
+		def evaluate_number(n):
+			x = Variable(name = "x")
+			f = Variable(name = "f")
+			current_number = x
+			for _ in range(int(n)):
+				current_number = Application(f, current_number)
+			return Abstraction(f, Abstraction(x, current_number), alias = n)
 
-		def keyword_match(prefix, suffix):
-			if isinstance(prefix, Token) and prefix.name in self.keywords:
-				return [prefix.name]
+		var_token = Token(name = "<var>", token_type = "variable")
+		variable_conversion = Dynamic_Rule(var_token, lambda v: Variable(name = v.name), lambda prefix, suffix: prefix.name in self.variables)
+		keyword_parsing = Dynamic_Rule(var_token, lambda kw: self.keywords[kw.name], lambda prefix, suffix: prefix.name in self.keywords)
+		number_parsing = Dynamic_Rule(var_token, lambda n: evaluate_number(n.name), lambda prefix, suffix: prefix.token_type == "number")
 
-		variable_conversion = Dynamic_Rule(rc.get_translation()["<var>"], lambda v: self.variables[v], variable_match)
-		keyword_parsing = Dynamic_Rule(rc.get_translation()["<right>"], lambda kw: self.keywords[kw], keyword_match)
-
-		x = Expression_Type("x", None)
-		f = Expression_Type(x, x)
-		nat = Expression_Type(f, f)
-		succ = Expression_Type(nat, nat)
-
-		self.cfg = CFG(rc.get_converted_rules() + [variable_conversion, keyword_parsing])
+		self.cfg = CFG(rc.get_converted_rules() + [variable_conversion, keyword_parsing, number_parsing])
 		self.cfg.convert_rules_to_CNF()
 		self.parser = CFG_Parser(self.cfg)
-		self.define("succ", "λn.λf.λx.(f (n f x))", expression_type = succ)
-		#self.define("pow", "λa.λb.(b a)")
-		self.define("0", "λa.λb.b", expression_type = nat)
-		self.define("plus", "λm.λn.(m succ n)")
-		self.define("mul", "λm.λn.λf.(m (n f))")
-		self.define("pred", "λn.λf.λx.(n (λg.λh.(h (g f))) (λu.x) (λu.u))")
+		self.define("test", "c (a b)")
+		self.define("succ", "λn.λf.λx.f (n f x)")
+		self.define("pow", "λa.λb.b a")
+		self.define("plus", "λm.λn.m succ n")
+		self.define("mul", "λm.λn.λf.m (n f)")
+		self.define("pred", "λn.λf.λx.n (λg.λh.(h (g f))) (λu.x) λu.u")
 		self.define("true", "λx.λy.x")
 		self.define("false", "λx.λy.y")
-		self.define("and", "λp.λq.(p q p)")
-		self.define("or", "λp.λq.(p p q)")
-		self.define("not", "λp.(p false)")
+		self.define("and", "λp.λq.p q p")
+		self.define("or", "λp.λq.p p q")
+		self.define("not", "λp.p false true")
 		self.define("ternary", "λp.λa.λb.(p a b)")
-		self.define("iszero", "λn.(n (λx.false) true)")
-		#self.define("fac", "λr.λn.(ternary (iszero n) 0 ((r r (pred n))))")
-		self.define("fac", "λf.λn.(ternary (iszero n) (succ 0) (mul n (f (pred n))))")
-		self.define("fix", "λf.((λx.(f (x x))) (λx.(f (x x))))", simplify = False)
-		self.define("1", "succ 0")
-		self.define("2", "succ 1")
-		self.define("3", "succ 2")
-		#self.parse("mul 2 2", verbose = True)
-		#print(self.parse("(mul n (f (pred n))) n"))
-		print("OK:", self.parse("fix fac (succ (succ 0))", verbose = False))
-		#self.simplify(self.parse("mul 2 2", simplify = False), verbose = True)
-		print("-----")
-		#self.parse("ternary (iszero 0) 0 (pow 3 3)", True)
-		#print("OK:", self.parse("(fac fac) (succ (succ 0))", True))
+		self.define("iszero", "λn.n (λx.false) true")
+		self.define("fac", "λf.λn.ternary (iszero n) 1 (mul n (f (pred n)))")
+		self.define("fix", "λf.(λx.f (x x)) λx.f (x x)", simplify = False)
 
 	def parse(self, string, verbose = False, simplify = True):
 		tokens = []
 		for token in Lambda_Calculus.scanner.scan(string):
 			if token.string in self.keywords:
-				tokens.append(Token(name = token.string))
+				tokens.append(Token(name = token.string, token_type = "keyword"))
+			elif "number" in token.token_type:
+				tokens.append(Token(name = token.string, token_type = "number"))
 			elif "variable" in token.token_type:
 				if token.string in self.variables:
-					tokens.append(Token(name = token.string))
+					tokens.append(Token(name = token.string, token_type = "variable"))
 				else:
-					new_variable = Variable(name = token.string)
-					self.variables[token.string] = new_variable
-					tokens.append(Token(name = token.string))
+					self.variables.add(token.string)
+					tokens.append(Token(name = token.string, token_type = "variable"))
 			else:
-				tokens.append(token.string)
+				tokens.append(Token(name = token.string, token_type = "terminal"))
 		interpretations = self.parser.parse(tokens)
 		if len(interpretations) == 0:
 			raise InvalidParseStringError(string)
 		elif len(interpretations) > 1:
+			for i in interpretations:
+				print(i.unwind_tree())
 			print("Warning:", string, "has", len(interpretations), "interpretations; choosing one at random")
 		result = interpretations[0].unwind_tree().get_value()
+		if isinstance(result, Definition):
+			return result.define(self)
 		if simplify:
 			return self.simplify(result, verbose = verbose)
 		else:
 			return result
 
-	def define(self, variable, string, simplify = True, expression_type = None):
-		self.keywords[variable] = self.parse(string, simplify = simplify)
-		self.keywords[variable].expression_type = expression_type
+	def define(self, variable, string, simplify = True):
+		result = self.parse(string, simplify = simplify)
+		result.alias = variable
+		self.variables -= {variable}
+		self.keywords[variable] = result
 
-	def simplify(self, value, verbose = False, count = None):
-		if count == None:
-			count = self.recursion_limit
-		if verbose:
-			value.describe()
-			print()
+	def simplify(self, value, verbose = False, limit = None):
+		count = 0
+		if limit == None:
+			limit = self.recursion_limit
+		else:
+			limit = count
 		while value.can_be_simplified():
-			value = value.simplify_step()
 			if verbose:
-				value.describe()
-				print()
-			count -= 1
-			if count == 0:
-				break
+				print(value.details())
+			value = value.simplify_step()
+			count += 1
+			if count == limit:
+				raise CannotSimplifyError
 		return value
 		
 class Lambda_Expression:
-
 	def abstract(self, variable):
 		return Abstraction(variable, self)
 
 	def can_be_simplified(self):
 		return False
 
-	def simplify_step(self, count = 10, verbose = False):
-		return self
+	def is_number(self):
+		"""Returns False if expression does not represent number, and number it represents otherwise.""" 
+		return False
+
+	def __init__(self, alias):
+		self.alias = alias
 
 	def __eq__(self, other):
 		return self.is_equal(other, {})
 
+	def __repr__(self):
+		number = self.is_number()
+		if self.alias != None:
+			return self.alias
+		elif number != False:
+			return str(number)
+		else:
+			return self.details()
+
 class Variable(Lambda_Expression):
 	number = 1
-	def __init__(self, name = None, expression_type = None):
+	def __init__(self, name = None, alias = None):
+		super().__init__(name)
 		if name == None:
 			self.name = "v_" + str(Variable.number)
 		else:
 			self.name = name
-		self.expression_type = expression_type
-		self.free_variables = {self}
-		self.variable_names = {name}
+		self.free_variables = {self.name}
+		self.variable_names = {self.name}
 		self.number = Variable.number
 		Variable.number += 1
 
@@ -179,14 +206,11 @@ class Variable(Lambda_Expression):
 		else:
 			return False
 
-	def __hash__(self):
-		return self.number
+	def simplify_step(self):
+		return self
 
-	def __repr__(self):
+	def details(self):
 		return self.name
-
-	def describe(self):
-		print("Simple variable:", self)
 
 	def is_equal(self, other, translation):
 		if not isinstance(other, Variable):
@@ -196,22 +220,17 @@ class Variable(Lambda_Expression):
 		else:
 			return self == other
 
-class Application:
-	def __init__(self, function, argument, expression_type = None):
+class Application(Lambda_Expression):
+	def __init__(self, function, argument, alias = None):
+		super().__init__(alias)
 		self.function = function
 		self.argument = argument
-		if (expression_type != None):
-			self.expression_type = expression_type
-		elif self.function.expression_type != None and self.argument.expression_type != None:
-			self.expression_type = self.function.expression_type.apply_to(self.argument.expression_type)
-		else:
-			self.expression_type = None
 		self.free_variables = function.free_variables | argument.free_variables
 		self.variable_names = function.variable_names | argument.variable_names
-		self.number = max(function.number, argument.number)
 
 	def substitute(self, replacer, replacee):
 		result = Application( self.function.substitute(replacer, replacee), self.argument.substitute(replacer, replacee) )
+		#print(self, "/", self.function, "/", replacer, replacee, "/", result, "/", result.function)
 		return result
 
 	def replace_variable(self, replacer, replacee):
@@ -234,39 +253,30 @@ class Application:
 		else:
 			raise CannotSimplifyError
 
-	#def simplify_step(self):
-	#	if self.expression_type != None:
-	#		result = self.function.simplify().evaluate(self.argument.simplify())
-	#		result.expression_type = self.expression_type
-
 	def is_equal(self, other, translation):
 		if not isinstance(other, Application):
 			return False
 		return self.function.is_equal(other.function, translation) and self.argument.is_equal(other.argument, translation)
 
-	def describe(self):
-		print("Function:", type(self.function), self.function)
-		print("Argument:", type(self.argument), self.argument)
-
-	def __repr__(self):
+	def details(self):
 		if isinstance(self.function, Abstraction) or not isinstance(self.argument, Variable):
 			return str(self.function) + " (" + str(self.argument) + ")"
 		else:
 			return str(self.function) + " " + str(self.argument)
 
 class Abstraction(Lambda_Expression):
-	def __init__(self, variable, body, expression_type = None):
+	def __init__(self, variable, body, alias = None):
+		super().__init__(alias)
 		self.variable = variable
 		self.body = body
-		self.expression_type = expression_type
-		self.number = max(variable.number, body.number)
-		self.free_variables = body.free_variables - {variable}
+		self.free_variables = body.free_variables - {variable.name}
 		self.variable_names = body.variable_names | {variable.name}
 
 	def substitute(self, replacer, replacee):
-		if replacee == self.variable or replacee.name not in self.variable_names:
+		if replacee.name not in self.free_variables:
+		#if replacee == self.variable or replacee.name not in self.variable_names:
 			return self
-		elif self.variable not in replacer.free_variables:
+		elif self.variable.name not in replacer.free_variables:
 			return Abstraction(self.variable, self.body.substitute(replacer, replacee))
 		else:
 			new_bound_variable = Variable(name = self.next_available_name())
@@ -311,41 +321,68 @@ class Abstraction(Lambda_Expression):
 			new_translation[self.variable] = other.variable
 			return self.body.is_equal(other.body, new_translation)
 
-	def describe(self):
-		print("Variable: λ" + str(self.variable))
-		print("Body:", self.body)
+	def is_number(self):
+		if not isinstance(self.body, Abstraction):
+			return False
+		f = self.variable
+		x = self.body.variable
+		number = 0
+		current = self.body.body
+		while isinstance(current, Application) and current.function == f:
+			current = current.argument
+			number += 1
+		if current == x:
+			return number
+		else:
+			return False
 
-	def __repr__(self):
+	def details(self):
 		if isinstance(self.body, Application):
 			return "λ" + str(self.variable) + ".(" + str(self.body) + ")"
 		else:
 			return "λ" + str(self.variable) + "." + str(self.body)
 
-class Expression_Type:
-	def __init__(self, argument_type = None, result_type = None):
-		self.argument_type = argument_type
-		self.result_type = result_type
+class Definition:
+	def __init__(self, variable, expression):
+		self.name = variable.alias
+		self.expression = expression
 
-	def apply_to(self, argument_type):
-		if argument_type == self.argument_type:
-			return self.result_type
-		else:
-			return None
-
-	def __eq__(self, other):
-		if not isinstance(other, Expression_Type):
-			return False
-		return self.argument_type == other.argument_type and self.result_type == other.result_type
-
-	def __repr__(self):
-		if self.result_type == None:
-			return self.argument_type
-		else:
-			return "(" + str(self.argument_type) + " -> " + str(self.result_type) + ")"
+	def define(self, context):
+		context.variables -= {self.name}
+		#try:
+		#	result = context.simplify(self.expression, limit = 1)
+		#except CannotSimplifyError:
+		result = self.expression
+		result.alias = self.name
+		context.keywords[self.name] = result
+		return result
 
 class InvalidParseStringError(Exception):
 	def __init__(self, string):
-		print("The string", string, "cannot be parsed.")
+		self.message = "The string " + string + " cannot be parsed."
 
 class CannotSimplifyError(Exception):
 	pass
+
+if __name__ == "__main__":
+	lc = Lambda_Calculus()
+	while True:
+		stdout.write(">> ")
+		stdout.flush()
+		user_input = stdin.readline().strip()
+		if user_input == "exit":
+			stdout.write("Goodbye.\n")
+			exit()
+		else:
+			try:
+				result = lc.parse(user_input, verbose = True)
+				if result.details() != result:
+					print(result.details())
+				print("Alias:", result)
+			except InvalidParseStringError as err:
+				print(err.message)
+			except InvalidCharacterError as err:
+				print(err.message)
+			except CannotSimplifyError:
+				print("Expression could not be reduced to normal form.")
+
