@@ -3,18 +3,9 @@ from context_free_grammars import *
 from untyped_lambda import *
 from regular_expressions import *
 import unittest
-from functools import partial
 
 class NFA_Test(unittest.TestCase):
-	def test_join(self):
-		alphabet = {'a', 'b'}
-		a = NFA(alphabet, char_type = "a")
-		b = NFA(alphabet, char_type = "b")
-		a = NFA.close_NFA(a)
-		b = NFA.close_NFA(b)
-		c = NFA.join_NFAs([a, b])
-		self.assertTrue(c.is_valid("bbb"))
-		self.assertFalse(c.is_valid("ab"))
+
 	def test_NFA(self):
 		alphabet = {'a', 'b', 'c'}
 		a = NFA(alphabet, char_type = "a", token_type = "OK")
@@ -44,7 +35,7 @@ class NFA_Test(unittest.TestCase):
 		self.assertFalse(dfa.is_valid("ababccca"))
 		self.assertFalse(dfa.is_valid("ccca"))
 
-	def best_re(self):
+	def test_re(self):
 		re = Regular_Expression("(ab)*c")
 		self.assertFalse(re.test("abab"))
 		self.assertTrue(re.test("ababc"))
@@ -59,24 +50,15 @@ class NFA_Test(unittest.TestCase):
 		re = Regular_Expression("(a*)^")
 		self.assertTrue(re.test("aaab"))
 		self.assertFalse(re.test("aaa"))
+		self.assertTrue(re.test("b"))
 
 	def test_lda(self):
 		lr = Lambda_Calculus()
-		#print(lr.parse("((λa.(a c)) abb)"))
-		succ = "(λa.λb.λc.(b ((a b) c)))"
-		one = "(λf.λx.(f x))"
-		x = lr.parse("((" + succ + " " + one + ") " + "d) e")
-		y = x.simplify().simplify()
-		print(y)
-		print(lr.parse("mul"))
-		x = lr.parse("(mul 0) 0")
-		print(x)
-		lr.define("1", "succ 0")
-		lr.define("2", "succ 1")
-		lr.parse("2")
-		print(lr.parse("(mul 2) 2"))
-		lr.define("plus", "λm.λn.((m succ) n)")
-		print(lr.parse("(((plus 1) 1) f) x"))
+		self.assertTrue(lr.parse("succ (pow 2 3)") == lr.parse("pow 3 2"))
+		self.assertTrue(lr.parse("fix fac 3") == lr.parse("pred 7"))
+		self.assertFalse(lr.parse("mul 2 2") == lr.parse("plus 2 3"))
+		lr.parse("f := fix fac")
+		self.assertTrue(lr.parse("f 0") == lr.parse("1"))
 
 if __name__ == "__main__":
 	unittest.main()

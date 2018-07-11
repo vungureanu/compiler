@@ -4,12 +4,12 @@ from functools import partial
 
 class Regular_Expression:
 	rules = [
-		"<exp> -> <exp>*",
-		"<exp> -> <exp>^",
-		"<exp> -> <exp>|<exp>",
-		"<exp> -> <exp><exp>",
-		"<exp> -> (<exp>)",
-		"<exp> -> <letter>"
+		"<exp> <exp> *",
+		"<exp> <exp> ^",
+		"<exp> <exp> | <exp>",
+		"<exp> <exp> <exp>",
+		"<exp> ( <exp> )",
+		"<exp> <letter>"
 	]
 	evaluations = [
 		lambda args: NFA.close_NFA(args[0]),
@@ -22,16 +22,18 @@ class Regular_Expression:
 
 	def __init__(self, string, alphabet = None):
 		if alphabet == None:
-			alphabet = {chr(_) for _ in range(ord("a"), ord("c")+1)}
-		letter_rules = [["<letter>", char, lambda l: NFA(alphabet, char_type = l)] for char in alphabet]
+			alphabet = {chr(i) for i in range(ord("a"), ord("c")+1)}
+		letter_tokens = {Token(name = char, token_type = "terminal") for char in alphabet}
+		letter_rules = [["<letter>", token, lambda t: NFA(alphabet, char_type = t.name)] for token in letter_tokens]
 		rc = Rule_Conversion(Regular_Expression.rules, Regular_Expression.evaluations, additional_rules = letter_rules)
 		cfg = CFG(rc.get_converted_rules())
 		cfg.convert_rules_to_CNF()
 		parser = CFG_Parser(cfg)
-		interpretations = parser.parse(string)
+		interpretations = parser.parse([Token(name = s, token_type = "terminal") for s in string])
+		# Each token is precisely one character long; no scanner is necessary
 		if len(interpretations) == 0:
 			raise NoValidInterpretation(string)
-		# Choose an interpretation at random; if the string was properly specified, they should all be correct
+		# Choose an interpretation at random; it is up to the user to provide an unambiguous string
 		self.dfa = interpretations[0].unwind_tree().get_value().convert()
 
 	def test(self, string):

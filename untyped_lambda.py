@@ -44,7 +44,7 @@ class Lambda_Calculus:
 		lambda args: Definition(variable = args[0], expression = args[4])
 	]
 
-	# Define valid words of language
+	# Define valid tokens of lambda caluclus for use in scanner
 
 	alphabet = [chr(i) for i in range(ord("a"), ord("z")+1)]
 	digits = {str(i) for i in range(10)}
@@ -56,8 +56,9 @@ class Lambda_Calculus:
 	number_nfa = NFA.close_NFA(NFA.join_NFAs(digit_nfas), new_token_type = "number")
 	scanner = NFA.join_NFAs([variable_names] + special_nfas + digit_nfas).convert()
 
-	def __init__(self, recursion_limit = 1000):
+	def __init__(self, recursion_limit = 1000, length_limit = 1000):
 		self.recursion_limit = recursion_limit
+		self.length_limit = length_limit
 		self.variables = set()
 		self.keywords = {}
 
@@ -79,7 +80,6 @@ class Lambda_Calculus:
 		self.cfg = CFG(rc.get_converted_rules() + [variable_conversion, keyword_parsing, number_parsing])
 		self.cfg.convert_rules_to_CNF()
 		self.parser = CFG_Parser(self.cfg)
-		self.define("test", "c (a b)")
 		self.define("succ", "λn.λf.λx.f (n f x)")
 		self.define("pow", "λa.λb.b a")
 		self.define("plus", "λm.λn.m succ n")
@@ -135,15 +135,15 @@ class Lambda_Calculus:
 		count = 0
 		if limit == None:
 			limit = self.recursion_limit
-		else:
-			limit = count
+		intermediate_steps = ""
 		while value.can_be_simplified():
-			if verbose:
-				print(value.details())
+			intermediate_steps += value.details() + "\n"
 			value = value.simplify_step()
 			count += 1
-			if count == limit:
+			if count == limit or value.length >= self.length_limit:
 				raise CannotSimplifyError
+		if verbose:
+			print(intermediate_steps)
 		return value
 		
 class Lambda_Expression:
@@ -172,6 +172,45 @@ class Lambda_Expression:
 		else:
 			return self.details()
 
+	def details(self):
+		# If written recursively, this function may exceed Python's stack limits
+		stack = [ self ]
+		description = ""
+		while len(stack) > 0:
+			token = stack.pop()
+			if isinstance(token, Variable):
+				description += token.name
+			elif isinstance(token, Application):
+				if isinstance(token.argument, Application):
+					stack.append(")")
+					stack.append(token.argument)
+					stack.append("(")
+				else:
+					stack.append(token.argument)
+				if token.function.ends_with_abstraction():
+					stack.append(")")
+					stack.append(token.function)
+					stack.append("(")
+				else:
+					stack.append(token.function)
+			elif isinstance(token, Abstraction):
+				description += "λ" + token.variable.name + "."
+				stack.append(token.body)
+			else:
+				description += token
+		return description
+
+	def ends_with_abstraction(self):
+		# If written recursively, this function may exceed Python's stack limits
+		term = self
+		while True:
+			if isinstance(term, Variable):
+				return False
+			elif isinstance(term, Abstraction):
+				return True
+			else:
+				term = term.argument
+
 class Variable(Lambda_Expression):
 	number = 1
 	def __init__(self, name = None, alias = None):
@@ -182,6 +221,7 @@ class Variable(Lambda_Expression):
 			self.name = name
 		self.free_variables = {self.name}
 		self.variable_names = {self.name}
+		self.length = 1
 		self.number = Variable.number
 		Variable.number += 1
 
@@ -209,16 +249,13 @@ class Variable(Lambda_Expression):
 	def simplify_step(self):
 		return self
 
-	def details(self):
-		return self.name
-
 	def is_equal(self, other, translation):
 		if not isinstance(other, Variable):
 			return False
-		if self in translation:
-			return translation[self] == other
+		if self.name in translation:
+			return translation[self.name] == other.name
 		else:
-			return self == other
+			return self.name == other.name
 
 class Application(Lambda_Expression):
 	def __init__(self, function, argument, alias = None):
@@ -227,10 +264,10 @@ class Application(Lambda_Expression):
 		self.argument = argument
 		self.free_variables = function.free_variables | argument.free_variables
 		self.variable_names = function.variable_names | argument.variable_names
+		self.length = function.length + argument.length
 
 	def substitute(self, replacer, replacee):
 		result = Application( self.function.substitute(replacer, replacee), self.argument.substitute(replacer, replacee) )
-		#print(self, "/", self.function, "/", replacer, replacee, "/", result, "/", result.function)
 		return result
 
 	def replace_variable(self, replacer, replacee):
@@ -258,12 +295,6 @@ class Application(Lambda_Expression):
 			return False
 		return self.function.is_equal(other.function, translation) and self.argument.is_equal(other.argument, translation)
 
-	def details(self):
-		if isinstance(self.function, Abstraction) or not isinstance(self.argument, Variable):
-			return str(self.function) + " (" + str(self.argument) + ")"
-		else:
-			return str(self.function) + " " + str(self.argument)
-
 class Abstraction(Lambda_Expression):
 	def __init__(self, variable, body, alias = None):
 		super().__init__(alias)
@@ -271,10 +302,10 @@ class Abstraction(Lambda_Expression):
 		self.body = body
 		self.free_variables = body.free_variables - {variable.name}
 		self.variable_names = body.variable_names | {variable.name}
+		self.length = body.length + 1
 
 	def substitute(self, replacer, replacee):
 		if replacee.name not in self.free_variables:
-		#if replacee == self.variable or replacee.name not in self.variable_names:
 			return self
 		elif self.variable.name not in replacer.free_variables:
 			return Abstraction(self.variable, self.body.substitute(replacer, replacee))
@@ -310,15 +341,15 @@ class Abstraction(Lambda_Expression):
 	def is_equal(self, other, translation):
 		if not isinstance(other, Abstraction):
 			return False
-		if self.variable in translation:
+		if self.variable.name in translation:
 			new_translation = dict(translation)
-			del new_translation[self.variable]
+			del new_translation[self.variable.name]
 		else:
 			new_translation = translation
 		if self.variable == other.variable:
 			return self.body.is_equal(other.body, new_translation)
 		else:
-			new_translation[self.variable] = other.variable
+			new_translation[self.variable.name] = other.variable.name
 			return self.body.is_equal(other.body, new_translation)
 
 	def is_number(self):
@@ -336,11 +367,11 @@ class Abstraction(Lambda_Expression):
 		else:
 			return False
 
-	def details(self):
-		if isinstance(self.body, Application):
-			return "λ" + str(self.variable) + ".(" + str(self.body) + ")"
-		else:
-			return "λ" + str(self.variable) + "." + str(self.body)
+	#def details(self):
+	#	if isinstance(self.body, Application):
+	#		return "λ" + str(self.variable) + ".(" + str(self.body) + ")"
+	#	else:
+	#		return "λ" + str(self.variable) + "." + str(self.body)
 
 class Definition:
 	def __init__(self, variable, expression):
@@ -349,10 +380,10 @@ class Definition:
 
 	def define(self, context):
 		context.variables -= {self.name}
-		#try:
-		#	result = context.simplify(self.expression, limit = 1)
-		#except CannotSimplifyError:
-		result = self.expression
+		try:
+			result = context.simplify(self.expression, limit = 100)
+		except CannotSimplifyError:
+			result = self.expression
 		result.alias = self.name
 		context.keywords[self.name] = result
 		return result

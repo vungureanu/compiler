@@ -79,14 +79,42 @@ class NFA:
 		for char in char_type:
 			self.states.append( NFA_State() )
 			self.states[-2].add_transition(char, self.states[-1])
-		self.states[-1].accepting = True
-		self.states[-1].token_type = {token_type}
-		self.accepting_states = {self.states[-1]}
+		if len(char_type) > 0:
+			self.states[-1].accepting = True
+			self.states[-1].token_type = {token_type}
+			self.accepting_states = {self.states[-1]}
 
 	def do_not_accept(self):
 		for state in self.accepting_states:
 			state.accepting = False
 		self.accepting_states = set()
+
+	def merge_states(self, s1, s2): #will modify self
+		"""Merges the states s1 and s2 assuming there is an epsilon-transition between s1 and s2"""
+		combined_state = NFA_State()
+		self.states.remove(s1)
+		self.states.remove(s2)
+		self.states.append(combined_state)
+		for state in self.states:
+			for input_char in state.transition:
+				if s1 in state.transition[input_char]:
+					state.transition[input_char].remove(s1)
+					state.transition[input_char].add(combined_state)
+				if s2 in state.transition[input_char]:
+					state.transition[input_char].remove(s2)
+					state.transition[input_char].add(combined_state)
+		for input_char in s1.transition:
+			if s1.transition[input_char] != {s2}:
+				combined_state.transition[input_char] = s1.transition[input_char] - {s2}
+		for input_char in s2.transition:
+			if input_char in combined_state.transition:
+				combined_state.transition[input_char] |= s2.transition[input_char]
+			else:
+				combined_state.transition[input_char] = s2.transition[input_char]
+		if s2 in self.accepting_states:
+			self.combined_state.token_type = s2.token_type
+			self.accepting_states.remove(s2)
+			self.accepting_states.add(combined_state)
 
 	def concatenate_NFAs(nfa1, nfa2): #may modify arguments
 		"""Returns an NFA which recognizes the language {ab | nfa1 accepts a and nfa2 accepts b}"""
@@ -95,6 +123,8 @@ class NFA:
 		nfa_concat.states = nfa1.states + nfa2.states
 		for state in nfa1.accepting_states:
 			state.add_transition(epsilon, nfa2.start_state)
+		if len(nfa1.accepting_states) == 1:
+			nfa_concat.merge_states(nfa1.accepting_states.pop(), nfa2.start_state)
 		nfa1.do_not_accept()
 		nfa2.start_state.starting = False
 		return nfa_concat
@@ -235,6 +265,8 @@ class DFA:
 		best_match = None
 		current_state = self.start_state
 		for i in range(len(string)):
+			if string[i] not in current_state.transition:
+				raise InvalidCharacterError(string[i])
 			current_state = current_state.transition[string[i]]
 			if current_state:
 				best_match = DFA.Match(string[:i+1], current_state.token_type)
@@ -265,7 +297,7 @@ class Translation:
 
 	def __init__(self, dfa):
 		self.dfa = dfa
-		self.dead_end = dfa.add_state(accepting = False, token_type = [], dead_end = True)
+		self.dead_end = dfa.add_state(accepting = False, token_type = set(), dead_end = True)
 		for char in dfa.alphabet:
 			self.dead_end.add_transition(char, self.dead_end)
 		self.nfa_to_dfa = { frozenset(): self.dead_end}
@@ -278,3 +310,7 @@ class Translation:
 			new_state = self.dfa.add_state(accepting = any(states), token_type = token_type)
 			self.nfa_to_dfa[states] = new_state
 			return Translation.Result(new_state, True)
+
+class InvalidCharacterError(Exception):
+	def __init__(self, char):
+		self.message = "The character " + char + " with ASCII code " + str(ord(char)) + " cannot be used."
