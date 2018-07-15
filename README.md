@@ -1,3 +1,51 @@
+## About ##
+
+The main purpose of this program is to reduce expressions of the pure, untyped lambda calculus to normal form using the normal-order evaluation strategy.  Also included are a lexer and parser which were used to construct this program; these can be used to parse other context-free grammars whose set of tokens is a regular language.
+
+## How to Use ##
+
+Assuming Python3 is installed, run the commands:
+
+```git clone https://github.com/vungureanu/compiler.git
+cd compiler
+python3 untyped_lambda.py'''
+
+You should see the prompt `>>`.  One can do three things at the prompt: enter `exit` to exit, enter a term of the (untyped) lambda calculus, and define an abbreviation for a term of the lambda calculus.  One can send an interrupt signal (e.g., by pressing Ctrl-C) to abort the current reduction.  Here is an example:
+
+```>> 1
+
+λf.λx.fx
+Alias: 1
+>> plus 1 1
+((λm.λn.(mλn.λf.λx.f(nfx))n)λf.λx.fx)λf.λx.fx
+(λn.((λf.λx.fx)λn.λf.λx.f(nfx))n)λf.λx.fx
+((λf.λx.fx)λn.λf.λx.f(nfx))λf.λx.fx
+(λx.(λn.λf.λx.f(nfx))x)λf.λx.fx
+(λn.λf.λx.f(nfx))λf.λx.fx
+λf.λx.f((λf.λx.fx)fx)
+λf.λx.f((λx.fx)x)
+
+λf.λx.f(fx)
+Alias: 2
+>> irreducible := (λx.x x) λx.x x
+(λx.xx)λx.xx
+Alias: irreducible
+>> irreducible
+Expression could not be reduced to normal form.
+>> ternary true irreducible othervalue
+Expression could not be reduced to normal form.
+>> ternary false irreducible othervalue
+(((λp.λa.λb.pab)λx.λy.y)((λx.xx)λx.xx))othervalue
+((λa.λb.(λx.λy.y)ab)((λx.xx)λx.xx))othervalue
+(λb.((λx.λy.y)((λx.xx)λx.xx))b)othervalue
+((λx.λy.y)((λx.xx)λx.xx))othervalue
+(λy.y)othervalue
+
+othervalue
+Alias: othervalue```
+
+Lambda terms can be represented in the usual fashion, except the application of the term `F` to the term `A` must be written `F A` rather than `FA`.  The following abbreviations are pre-defined: the positive integers, `succ`, `pred`, `plus`, `mul`, `pow`, `true`, `false`, `and`, `or`, `not`, `ternary`, `iszero`, and `fix`.
+
 This project contains two components.  The first is a compiler front-end consisting of a scanner, found in `finite_automata.py`, and a parser, found in `context_free_grammar.py`.  The function of the scanner is to transform a string into a sequence of `Token`s, which is then transformed by the parser into a `Parse_Node` which reflects its hierarchical structure.  The parser performs this transformation by means of the `Rule`s it is given.  The second component is an interpreter for the pure, untyped lambda calculus which uses the compiler front-end.
 
 The file `finite_automata.py` contains classes which emulate both deterministic (`DFA`) and non-deterministic (`NFA`) finite automata, and allow for conversion between the two.  Each finite automaton recognizes a particular regular language; we shall call strings in that language _valid_.  The purpose of a finite automaton is to partition strings into `Token`s (via `scan`).  The string `s` is partitioned as follows: the first token is the longest valid substring starting with the first character of `s`; the n<sup>th</sup> token is the longest valid substring of `s` starting with the character after the last character of the n-1<sup>st</sup> token.  An automaton may be provided with an optional string `token_type`; the `token_type` property of tokens it produces will then be that string.  Given NFAs which recognize L and M, methods are provided for constructing an NFA which recognizes {lm | l in L and m in M}, {s | s in L or s in M}, {s<sub>1</sub>...s<sub>n</sub> | s<sub>i</sub> in L}, and {s | s not in L}.
